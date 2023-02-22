@@ -416,7 +416,7 @@ def spray(cred, n, domain, ip, save, outputfile, accounts, status, sleep, jitter
     tried += 1
     username, password = cred.split(":")
     if n:
-        paassword = ''
+        password = ''
     try:
         executer = GETTGT(username, password, domain, ip)
         validate = executer.run(save)
