@@ -1,4 +1,4 @@
-
+#!/usr/bin/env python3
 from ast import arg
 from impacket.smbconnection import SMBConnection
 from impacket.spnego import SPNEGO_NegTokenInit, TypesMech
