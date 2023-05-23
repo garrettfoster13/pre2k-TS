@@ -1,3 +1,4 @@
+
 from ast import arg
 from impacket.smbconnection import SMBConnection
 from impacket.spnego import SPNEGO_NegTokenInit, TypesMech
@@ -52,9 +53,9 @@ def arg_parse():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     unauth_parser = subparsers.add_parser("unauth", help='Pass a list of hostnames to test authentication.')
-    unauth_parser.add_argument('-d', action='store', metavar='', required=True, help="Target domain")
-    unauth_parser.add_argument('-dc-ip', action='store', metavar='', help = "IP address or FQDN of domain controller", required=True)
-    unauth_parser.add_argument("-inputfile", action="store", help="Pass a list of machine accounts to validate. Format machinename$")
+    unauth_parser.add_argument('-d', action='store', required=True, help="Target domain")
+    unauth_parser.add_argument('-dc-ip', action='store', required=True, help = "IP address or FQDN of domain controller")
+    unauth_parser.add_argument("-inputfile", action="store", required=True, help="Pass a list of machine accounts to validate. Format machinename$")
     unauth_parser.add_argument("-outputfile", action="store", help="Log results to file.")
     unauth_parser.add_argument("-verbose", action="store_true", help="Verbose output displaying failed attempts.")
     unauth_parser.add_argument("-stoponsuccess", action='store_true', help="Stop on sucessful authentication")
@@ -66,19 +67,19 @@ def arg_parse():
 
 
     auth_parser = subparsers.add_parser("auth", help="Query the domain for pre Windows 2000 machine accounts.")
-    auth_parser.add_argument("-u", action='store', metavar='', help="Username")
-    auth_parser.add_argument('-p', action='store', metavar='', help="Password")
-    auth_parser.add_argument('-d', action='store', metavar='', required=True, help="Target domain")
-    auth_parser.add_argument('-dc-ip', action='store', metavar='', help = "IP address or FQDN of domain controller", required=True)
-    auth_parser.add_argument('-ldaps', action="store_true", help='Use LDAPS instead of LDAP')
-    auth_parser.add_argument("-k", action="store_true", help='Use Kerberos authentication')
+    auth_parser.add_argument("-u", action="store", required=True, help="Username")
+    auth_parser.add_argument("-p", action="store", required =True, help="Password")
+    auth_parser.add_argument("-d", action="store", required=True, help="Target domain")
+    auth_parser.add_argument("-dc-ip", action='store', required=True, help="IP address or FQDN of domain controller")
+    auth_parser.add_argument("-ldaps", action="store_true", help="Use LDAPS instead of LDAP")
+    auth_parser.add_argument("-k", action="store_true", help="Use Kerberos authentication")
     auth_parser.add_argument("-no-pass", action="store_true", help="don't ask for password (useful for -k)")
-    auth_parser.add_argument("-hashes", action="store",metavar="LMHASH:NTHASH", help="LM and NT hashes, format is LMHASH:NTHASH",)
-    auth_parser.add_argument('-aes', action="store", metavar="hex key", help='AES key to use for Kerberos Authentication (128 or 256 bits)')
-    auth_parser.add_argument('-targeted', action="store_true", help="Search for computer accounts with logoncount=0.")
+    auth_parser.add_argument("-hashes", action="store", metavar="LMHASH:NTHASH", help="LM and NT hashes, format is LMHASH:NTHASH",)
+    auth_parser.add_argument("-aes", action="store", metavar="hex key", help="AES key to use for Kerberos Auth.")
+    auth_parser.add_argument("-targeted", action="store_true", help="Search for computer accounts with logoncount=0.")
     auth_parser.add_argument("-verbose", action="store_true", help="Verbose output displaying failed attempts.")
     auth_parser.add_argument("-outputfile", action="store", help="Log results to file.")
-    auth_parser.add_argument("-stoponsuccess", action='store_true', help="Stop on sucessful authentication")
+    auth_parser.add_argument("-stoponsuccess", action="store_true", help="Stop on sucessful authentication")
     auth_parser.add_argument("-save", action="store_true", help="Request and save a .ccache file to your current working directory")
     auth_parser.add_argument("-n", action="store_true", help="Attempt authentication with an empty password.")
     auth_parser.add_argument("-sleep", action="store", help="Length of time to sleep between attempts in seconds.", type=int)
