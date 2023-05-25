@@ -323,6 +323,8 @@ class GETTGT:
         self.__password = password
         self.__user = username
         self.__domain = domain
+        self.__lmhash = ''
+        self.__nthash = ''
         self.__kdcHost = dc_ip
 
     def saveTicket(self, ticket, sessionKey):
@@ -338,7 +340,7 @@ class GETTGT:
 
     def run(self, save):
         userName = Principal(self.__user, type=constants.PrincipalNameType.NT_PRINCIPAL.value)
-        tgt, cipher, oldSessionKey, sessionKey = getKerberosTGT(userName, self.__password, self.__domain, None, None, None, self.__kdcHost)
+        tgt, cipher, oldSessionKey, sessionKey = getKerberosTGT(userName, self.__password, self.__domain, unhexlify(self.__lmhash), unhexlify(self.__nthash), None, self.__kdcHost)
         if save:
             self.saveTicket(tgt,oldSessionKey)
         return True
