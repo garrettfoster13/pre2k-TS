@@ -475,7 +475,7 @@ def parse_input(inputfile, args):
     with open (inputfile) as f:
         y = f.read().split("\n")
         for i in y:
-            if len(i) >= 15:
+            if len(i) >= 16:
                 # if accountname is 15 chars or more pw is first 14
                 credentials = i + ":" + i.lower()[:-2]
             else:
