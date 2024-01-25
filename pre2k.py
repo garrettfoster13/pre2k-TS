@@ -64,7 +64,7 @@ def arg_parse():
 
     auth_parser = subparsers.add_parser("auth", help="Query the domain for pre Windows 2000 machine accounts.")
     auth_parser.add_argument("-u", action="store", required=True, help="Username")
-    auth_parser.add_argument("-p", action="store", required =True, help="Password")
+    auth_parser.add_argument("-p", action="store", help="Password")
     auth_parser.add_argument("-d", action="store", required=True, help="Target domain")
     auth_parser.add_argument("-dc-ip", action='store', required=True, help="IP address or FQDN of domain controller")
     auth_parser.add_argument("-ldaps", action="store_true", help="Use LDAPS instead of LDAP")
