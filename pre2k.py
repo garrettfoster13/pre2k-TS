@@ -68,6 +68,7 @@ def arg_parse():
     auth_parser.add_argument("-d", action="store", required=True, help="Target domain")
     auth_parser.add_argument("-dc-ip", action='store', required=True, help="IP address or FQDN of domain controller")
     auth_parser.add_argument("-ldaps", action="store_true", help="Use LDAPS instead of LDAP")
+    auth_parser.add_argument("-binding", action="store_true", help="Use LDAPS channel binding")
     auth_parser.add_argument("-k", action="store_true", help="Use Kerberos authentication")
     auth_parser.add_argument("-no-pass", action="store_true", help="don't ask for password (useful for -k)")
     auth_parser.add_argument("-hashes", action="store", metavar="LMHASH:NTHASH", help="LM and NT hashes, format is LMHASH:NTHASH",)
@@ -115,7 +116,7 @@ def get_machine_name(domain_controller, domain):
         s.logoff()
     return s.getServerName()
 
-def init_ldap_connection(target, tls_version, domain, username, password, lmhash, nthash, domain_controller, kerberos, hashes, aesKey):
+def init_ldap_connection(target, tls_version, domain, username, password, lmhash, nthash, domain_controller, kerberos, hashes, aesKey, channel_binding):
     user = '%s\\%s' % (domain, username)
     if tls_version is not None:
         use_ssl = True
@@ -133,15 +134,15 @@ def init_ldap_connection(target, tls_version, domain, username, password, lmhash
     elif hashes is not None:
         if lmhash == "":
             lmhash = "aad3b435b51404eeaad3b435b51404ee"
-        ldap_session = ldap3.Connection(ldap_server, user=user, password=lmhash + ":" + nthash, authentication=ldap3.NTLM, auto_bind=True)
+        ldap_session = ldap3.Connection(ldap_server, user=user, password=lmhash + ":" + nthash, authentication=ldap3.NTLM, auto_bind=True, **channel_binding)
     elif username == '' and password == '':
-        ldap_session = ldap3.Connection(ldap_server, authentication=ANONYMOUS, auto_bind=True)
+        ldap_session = ldap3.Connection(ldap_server, authentication=ANONYMOUS, auto_bind=True, **channel_binding)
     else:
-        ldap_session = ldap3.Connection(ldap_server, user=user, password=password, authentication=ldap3.NTLM, auto_bind=True)
+        ldap_session = ldap3.Connection(ldap_server, user=user, password=password, authentication=ldap3.NTLM, auto_bind=True, **channel_binding)
 
     return ldap_server, ldap_session
 
-def init_ldap_session(domain, username, password, lmhash, nthash, kerberos, domain_controller, ldaps, hashes, aesKey):
+def init_ldap_session(domain, username, password, lmhash, nthash, kerberos, domain_controller, ldaps, hashes, aesKey, **channel_binding):
     if kerberos:
         #target = domain_controller
         netbiosname = get_machine_name(domain_controller, domain)
@@ -155,11 +156,11 @@ def init_ldap_session(domain, username, password, lmhash, nthash, kerberos, doma
 
     if ldaps:
         try:
-            return init_ldap_connection(target, ssl.PROTOCOL_TLSv1_2, domain, username, password, lmhash, nthash, domain_controller, kerberos, hashes, aesKey)
+            return init_ldap_connection(target, ssl.PROTOCOL_TLSv1_2, domain, username, password, lmhash, nthash, domain_controller, kerberos, hashes, aesKey, **channel_binding)
         except ldap3.core.exceptions.LDAPSocketOpenError:
-            return init_ldap_connection(target, ssl.PROTOCOL_TLSv1, domain, username, password, lmhash, nthash, domain_controller, kerberos, hashes, aesKey)
+            return init_ldap_connection(target, ssl.PROTOCOL_TLSv1, domain, username, password, lmhash, nthash, domain_controller, kerberos, hashes, aesKey, **channel_binding)
     else:
-        return init_ldap_connection(target, None, domain, username, password, lmhash, nthash, domain_controller, kerberos, hashes, aesKey)
+        return init_ldap_connection(target, None, domain, username, password, lmhash, nthash, domain_controller, kerberos, hashes, aesKey, **channel_binding)
 
 def ldap3_kerberos_login(connection, target, user, password, domain='', lmhash='', nthash='', aesKey='', kdcHost=None, TGT=None, TGS=None, useCache=True):
     from pyasn1.codec.ber import encoder, decoder
@@ -498,11 +499,14 @@ def main():
             args.lmhash, args.nthash = args.hashes.split(':')
         if not (args.p or args.lmhash or args.nthash or args.aes or args.no_pass):
                 args.p = getpass("Password:")
+        
+        channel_binding = dict()
+        if args.binding:
+            channel_binding = channel_binding = dict(channel_binding=ldap3.TLS_CHANNEL_BINDING)
         creds = 0
 
         try:
-            ldap_server, ldap_session = init_ldap_session(domain=args.d, username=args.u, password=args.p, lmhash=args.lmhash, nthash=args.nthash, kerberos=args.k, domain_controller=args.dc_ip, aesKey=args.aes, hashes=args.hashes, ldaps=args.ldaps
- )
+            ldap_server, ldap_session = init_ldap_session(domain=args.d, username=args.u, password=args.p, lmhash=args.lmhash, nthash=args.nthash, kerberos=args.k, domain_controller=args.dc_ip, aesKey=args.aes, hashes=args.hashes, ldaps=args.ldaps, channel_binding=channel_binding)
         except ldap3.core.exceptions.LDAPSocketOpenError as e: 
             if 'invalid server address' in str(e):
                 print (f'Invalid server address - {args.d}')
