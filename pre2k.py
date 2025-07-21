@@ -420,12 +420,12 @@ def spray(cred, n, domain, ip, save, outputfile, accounts, status, sleep, jitter
     try:
         executer = GETTGT(username, password, domain, ip)
         validate = executer.run(save)
-    except KerberosError:
+    except KerberosError as kerberror:
         if verbose:
             if n:
-                line = (f'[-] Invalid credentials: {domain}\\{username}:nopass')
+                line = (f'[-] Invalid credentials: {domain}\\{username}:nopass. Error: {kerberror}')
             else:
-                line = (f'[-] Invalid credentials: {domain}\\{cred}')
+                line = (f'[-] Invalid credentials: {domain}\\{cred}. Error: {kerberror}')
             print (line)
             if outputfile:
                     printlog(line, outputfile)
